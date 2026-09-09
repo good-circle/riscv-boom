@@ -19,6 +19,7 @@ import freechips.rocketchip.rocket.{CSR, Causes, DecodeLogic}
 import freechips.rocketchip.util._
 
 import boom.v4.common._
+import boom.v4.common.BoomCustomInstructions.NEMU_TRAP
 import boom.v4.util._
 
 // scalastyle:off
@@ -90,6 +91,10 @@ object DecodeTables
     SRLW               -> List(Y, N, fc2oh(FC_ALU) , RT_FIX, RT_FIX, RT_FIX, N, IS_N, N, N, N, M_X     , N, N, CSR.N, DW_32 , FN_SR  , X,X,X,X,X, X,X,X,X,X,X,X, X,X,X,X)
   )
   def X_table: Seq[(BitPat, List[BitPat])] = Seq(
+    // Treat the NEMU simulation trap as an architectural no-op so it reaches
+    // a precise retirement boundary instead of raising illegal-instruction.
+    NEMU_TRAP
+                       -> List(Y, N, fc2oh(FC_ALU) , RT_X  , RT_X  , RT_X  , N, IS_N, N, N, N, M_X     , N, N, CSR.N, DW_XPR, FN_ADD , X,X,X,X,X, X,X,X,X,X,X,X, X,X,X,X),
     LW                 -> List(Y, N, fc2oh(FC_AGEN), RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, M_XRD   , N, N, CSR.N, DW_X  , FN_X   , X,X,X,X,X, X,X,X,X,X,X,X, X,X,X,X),
     LH                 -> List(Y, N, fc2oh(FC_AGEN), RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, M_XRD   , N, N, CSR.N, DW_X  , FN_X   , X,X,X,X,X, X,X,X,X,X,X,X, X,X,X,X),
     LHU                -> List(Y, N, fc2oh(FC_AGEN), RT_FIX, RT_FIX, RT_X  , N, IS_I, Y, N, N, M_XRD   , N, N, CSR.N, DW_X  , FN_X   , X,X,X,X,X, X,X,X,X,X,X,X, X,X,X,X),
