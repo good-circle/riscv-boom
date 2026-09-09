@@ -142,9 +142,10 @@ class RenameStage(
   float: Boolean)
 (implicit p: Parameters) extends AbstractRenameStage(plWidth, numWbPorts)(p)
 {
-  val int = !float
-  val pregSz = log2Ceil(numPhysRegs)
-  val rtype = if (float) RT_FLT else RT_FIX
+  def int = !float
+  def pregSz = log2Ceil(numPhysRegs)
+  def rtype = if (float) RT_FLT else RT_FIX
+  val debug_com_map_table = IO(Output(Vec(32, UInt(pregSz.W))))
 
   //-------------------------------------------------------------
   // Helper Functions
@@ -200,6 +201,7 @@ class RenameStage(
     numPhysRegs,
     false,
     float))
+  debug_com_map_table := maptable.io.debug_com_map_table
   val freelist = Module(
     if (
       (enableColumnALUWrites && int) ||

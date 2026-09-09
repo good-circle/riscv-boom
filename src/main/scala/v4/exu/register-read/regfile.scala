@@ -28,6 +28,8 @@ abstract class RegisterFile[T <: Data](
   numWritePorts: Int)
   (implicit p: Parameters) extends BoomModule
 {
+  /** Physical register contents, used only by architectural state probes. */
+  val debug_values = IO(Output(Vec(numRegisters, dType)))
   val io = IO(new BoomBundle {
     val arb_read_reqs  = Vec(numReadPorts, Flipped(Decoupled(UInt(log2Ceil(numRegisters).W))))
     val rrd_read_resps = Vec(numReadPorts, Output(dType))
@@ -86,7 +88,11 @@ class BankedRF[T <: Data](
   if (numBanks == 1) {
     require(numLogicalReadPortsPerBank == numLogicalReadPorts)
     io <> rfs(0).io
+    debug_values := rfs(0).debug_values
   } else {
+    for (i <- 0 until numRegisters) {
+      debug_values(i) := rfs(i % numBanks).debug_values(i / numBanks)
+    }
     val widxs = Array.fill(numBanks)(0)
     for (i <- 0 until numWritePorts) {
       if (bankedWritePortArray(i) != None) {
@@ -143,6 +149,7 @@ class PartiallyPortedRF[T <: Data](
     typeStr = "Partially Ported " + typeStr,
   ))
   rf.io.write_ports := io.write_ports
+  debug_values := rf.debug_values
 
   val port_issued = Array.fill(numPhysicalReadPorts) { false.B }
   val port_addrs  = Array.fill(numPhysicalReadPorts) { 0.U(log2Ceil(numRegisters).W) }
@@ -201,11 +208,18 @@ class FullyPortedRF[T <: Data](
 
   io.arb_read_reqs.map(p => p.ready := true.B)
 
-  val regfile = Mem(numRegisters, dType)
+  // Physical registers must have deterministic reset contents.  BOOM's
+  // original implementation used an uninitialised `Mem`, which is fine for
+  // hardware after software has established every register but makes the
+  // very first instructions (and DiffTest) observe simulator garbage.  A
+  // resettable vector retains the same one-cycle indexed-read behaviour while
+  // ensuring the architectural initial state is zero.
+  val regfile = RegInit(VecInit(Seq.fill(numRegisters)(0.U.asTypeOf(dType))))
+  debug_values := regfile
 
   (0 until numReadPorts) map {p => io.rrd_read_resps(p) := regfile(RegNext(io.arb_read_reqs(p).bits)) }
 
-  io.write_ports map { p => when (p.valid) { regfile(p.bits.addr) := p.bits.data }}
+  io.write_ports map { p => when (p.valid) {
+    regfile(p.bits.addr) := p.bits.data
+  }}
 }
-
-

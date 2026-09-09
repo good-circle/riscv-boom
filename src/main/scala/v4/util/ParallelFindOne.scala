@@ -8,7 +8,7 @@ package boom.v4.util
 
 import chisel3._
 import chisel3.util.{log2Ceil,log2Floor, Cat,Mux1H}
-import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
+import chisel3.experimental.hierarchy.{instantiable, public}
 import circt.stage.ChiselStage
 
 @instantiable
@@ -34,9 +34,8 @@ class ParallelFindOne(decodeWidth : Int, favor: Boolean) extends Module {
     //   bitmask(0) -> 0.U(1.W)
     // )) // Note: not truly parallel for lack of X
   } else {
-    val decoder_def = Definition(new ParallelFindOne(decodeWidth / 2, favor))
-    val lower_dec = Instance(decoder_def)
-    val upper_dec = Instance(decoder_def)
+    val lower_dec = Module(new ParallelFindOne(decodeWidth / 2, favor))
+    val upper_dec = Module(new ParallelFindOne(decodeWidth / 2, favor))
 
     val lower_success = Wire(Bool())
     val upper_success = Wire(Bool())

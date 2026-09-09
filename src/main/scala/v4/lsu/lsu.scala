@@ -127,6 +127,14 @@ class LSUCoreIO(implicit p: Parameters) extends BoomBundle()(p)
 
   val commit      = Input(new CommitSignals)
   val commit_load_at_rob_head = Input(Bool())
+  // One bit per retirement lane, aligned with commit.  DiffTest uses this to
+  // skip reference execution for uncacheable device accesses while still
+  // synchronizing the architectural destination value from the DUT.
+  val commit_is_mmio = Output(Vec(coreWidth, Bool()))
+  // Store-conditional outcome at retirement for DiffTest's LR/SC
+  // microarchitectural-state synchronization.
+  val commit_sc_valid = Output(Vec(coreWidth, Bool()))
+  val commit_sc_success = Output(Vec(coreWidth, Bool()))
 
   // Stores clear busy bit when stdata is received
   // memWidth for incoming addr/datagen, +1 for fp dgen, +1 for clr_head pointer
@@ -198,6 +206,7 @@ class STQEntry(implicit p: Parameters) extends BoomBundle()(p)
 {
   val addr                = Valid(UInt(coreMaxAddrBits.W))
   val addr_is_virtual     = Bool() // Virtual address, we got a TLB miss
+  val addr_is_uncacheable = Bool()
   val data                = Valid(UInt(xLen.W))
 
   val committed           = Bool() // committed by ROB
@@ -256,6 +265,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   val stq_uop             = Reg(Vec(numStqEntries, new MicroOp))
   val stq_addr            = Reg(Vec(numStqEntries, Valid(UInt(coreMaxAddrBits.W))))
   val stq_addr_is_virtual = Reg(Vec(numStqEntries, Bool()))
+  val stq_addr_is_uncacheable = Reg(Vec(numStqEntries, Bool()))
   val stq_data            = Reg(Vec(numStqEntries, Valid(UInt(xLen.W))))
   val stq_committed       = Reg(Vec(numStqEntries, Bool()))
   val stq_succeeded       = Reg(Vec(numStqEntries, Bool()))
@@ -269,6 +279,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
     e.bits.uop                 := stq_uop                (idx)
     e.bits.addr                := stq_addr               (idx)
     e.bits.addr_is_virtual     := stq_addr_is_virtual    (idx)
+    e.bits.addr_is_uncacheable := stq_addr_is_uncacheable(idx)
     e.bits.data                := stq_data               (idx)
     e.bits.committed           := stq_committed          (idx)
     e.bits.succeeded           := stq_succeeded          (idx)
@@ -982,6 +993,7 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
       stq_addr           (stq_idx).bits  := Mux(exe_tlb_miss(w), exe_tlb_vaddr(w), exe_tlb_paddr(w))
       stq_uop            (stq_idx).pdst  := exe_tlb_uop(w).pdst // Needed for AMOs
       stq_addr_is_virtual(stq_idx)       := exe_tlb_miss(w)
+      stq_addr_is_uncacheable(stq_idx)   := exe_tlb_uncacheable(w) && !exe_tlb_miss(w)
 
       assert(!stq_addr(stq_idx).valid,
         "[lsu] Translating store is overwriting a valid address")
@@ -1248,11 +1260,12 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
           when ((l_executed || l_succeeded) &&
                 !s1_executing_loads(i) && // If the load is proceeding in parallel we don't need to kill it
                 l_observed) {        // Its only a ordering failure if the cache line was observed between the younger load and us
-            //ldq_order_fail(i) := true.B
-            // failed_load := true.B
-
-	    // this case is no longer possible where an older search gets replayed and found that a younger search has already been released. Note that this is stronger than rvwmo.
-            assert(false.B)
+            // An older replaying load observed that a younger overlapping load
+            // has already been released.  Recover through the normal RVWMO
+            // ordering-failure replay path (upstream BOOM commit 999f41e3)
+            // instead of treating this legal recovery case as fatal.
+            ldq_order_fail(i) := true.B
+            failed_load := true.B
           }
         } .elsewhen (GetRealLSQIdx(lcam_ldq_idx(w)) =/= i.U) {
           // The load is older, and it wasn't executed
@@ -1748,6 +1761,13 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   {
     val commit_store = io.core.commit.valids(w) && io.core.commit.uops(w).uses_stq
     val commit_load  = io.core.commit.valids(w) && io.core.commit.uops(w).uses_ldq
+    io.core.commit_is_mmio(w) :=
+      (commit_store && stq_addr_is_uncacheable(temp_stq_commit_head)) ||
+      (commit_load && ldq_addr_is_uncacheable(temp_ldq_head))
+    io.core.commit_sc_valid(w) := commit_store &&
+      stq_uop(temp_stq_commit_head).mem_cmd === "b00111".U
+    io.core.commit_sc_success(w) :=
+      stq_debug_wb_data(temp_stq_commit_head) === 0.U
     // val stq_e = WireInit(stq(temp_stq_commit_head))
     // val ldq_e = WireInit(ldq(temp_ldq_head))
     val l_uop = WireInit(ldq_uop(temp_ldq_head))

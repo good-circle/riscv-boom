@@ -40,8 +40,11 @@ import freechips.rocketchip.tile.{HasFPUParameters, TraceBundle, CustomCSR}
 import freechips.rocketchip.util.{Str, UIntIsOneOf, CoreMonitorBundle, PlusArg}
 import freechips.rocketchip.devices.tilelink.{PLICConsts, CLINTConsts}
 import freechips.rocketchip.trace.{TraceCoreIngress, TraceCoreInterface, TraceCoreParams}
+import chisel3.util.experimental.BoringUtils
+import difftest.{DifftestModule, DiffArchEvent, DiffArchIntRenameTable, DiffCSRState, DiffInstrCommit, DiffLrScEvent, DiffPhyIntRegState, DiffTrapEvent}
 
 import boom.v4.common._
+import boom.v4.common.BoomCustomInstructions.NEMU_TRAP
 import boom.v4.ifu.{GlobalHistory, HasBoomFrontendParameters}
 import boom.v4.util._
 
@@ -298,7 +301,9 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
       ("DTLB miss",   () => io.lsu.perf.tlbMiss),
       ("L2 TLB miss", () => io.ptw.perf.l2miss)))))
   val csr = Module(new freechips.rocketchip.rocket.CSRFile(perfEvents, boomParams.customCSRs.decls, roccCSRs.flatten))
-  csr.io.inst foreach { c => c := DontCare }
+  // The ROB debug instruction memory is read one cycle after retirement, which
+  // is also when CSRFile consumes the registered exception/retire signals.
+  csr.io.inst zip rob.io.commit.debug_insts foreach { case (c, inst) => c := inst }
   csr.io.rocc_interrupt := io.rocc.interrupt
   csr.io.gva := DontCare
   csr.io.htval := DontCare
@@ -1358,6 +1363,129 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
   coreMonitorBundle := DontCare
   coreMonitorBundle.clock  := clock
   coreMonitorBundle.reset  := reset
+
+  // DiffTest architectural commit stream.  Uops/valids are delayed to align
+  // with the ROB debug instruction memory; debug_insts itself must not be
+  // delayed again (see the existing trace interface below).
+  val diffExit = Wire(Vec(coreWidth, Bool()))
+  val diffExitPC = Wire(Vec(coreWidth, UInt(xLen.W)))
+  for (w <- 0 until coreWidth) {
+    val commitUop = RegNext(rob.io.commit.uops(w))
+    val commitValid = RegNext(rob.io.commit.arch_valids(w), false.B)
+    val commitInst = Mux(commitUop.is_rvc,
+      Cat(0.U(16.W), rob.io.commit.debug_insts(w)(15, 0)),
+      rob.io.commit.debug_insts(w))
+    val commitCSR = commitInst(31, 20)
+    val isHpmCSR = commitInst(6, 0) === "h73".U && (
+      (commitCSR >= "hb03".U && commitCSR <= "hb1f".U) ||
+      (commitCSR >= "hc03".U && commitCSR <= "hc1f".U) ||
+      (commitCSR >= "h323".U && commitCSR <= "h33f".U))
+    val isDebugCSR = commitInst(6, 0) === "h73".U &&
+      (commitCSR >= "h7a0".U && commitCSR <= "h7bf".U)
+    val isCounterCSR = commitInst(6, 0) === "h73".U && (
+      commitCSR === "hc00".U || commitCSR === "hc01".U || commitCSR === "hc02".U ||
+      commitCSR === "hb00".U || commitCSR === "hb02".U ||
+      commitCSR === "h106".U || commitCSR === "h306".U || commitCSR === "h320".U)
+    val isIdCSR = commitInst(6, 0) === "h73".U &&
+      (commitCSR >= "hf11".U && commitCSR <= "hf14".U)
+    val isUnsupportedPmpCSR = commitInst(6, 0) === "h73".U &&
+      (commitCSR >= "h3b4".U && commitCSR <= "h3bf".U)
+    val commit = DifftestModule(new DiffInstrCommit(numIntPhysRegs), delay = 0)
+    commit.coreid := 0.U
+    commit.index := w.U
+    commit.valid := commitValid
+    // Hardware performance counters are intentionally implementation-defined
+    // and BOOM's counters advance differently from NEMU's.  Treat their CSR
+    // accesses like MMIO so DiffTest copies the architectural result while
+    // retaining strict comparison for deterministic ISA/privileged state.
+    commit.skip := RegNext(io.lsu.commit_is_mmio(w), false.B) || isHpmCSR || isDebugCSR || isCounterCSR || isIdCSR || isUnsupportedPmpCSR
+    commit.isRVC := commitUop.is_rvc
+    commit.rfwen := commitUop.dst_rtype === RT_FIX && commitUop.ldst =/= 0.U
+    commit.fpwen := commitUop.dst_rtype === RT_FLT
+    commit.vecwen := false.B
+    commit.v0wen := false.B
+    commit.wpdest := commitUop.pdst
+    commit.wdest := commitUop.ldst
+    commit.otherwpdest.foreach(_ := 0.U)
+    commit.pc := Sext(commitUop.debug_pc(vaddrBits-1, 0), xLen)
+    commit.instr := commitInst
+    commit.robIdx := 0.U
+    commit.lqIdx := 0.U
+    commit.sqIdx := 0.U
+    commit.isLoad := commitUop.uses_ldq
+    commit.isStore := commitUop.uses_stq
+    commit.nFused := 0.U
+    diffExit(w) := commitValid && commitInst === NEMU_TRAP
+    diffExitPC(w) := commit.pc
+    commit.setSpecial(isExit = diffExit(w))
+  }
+
+  val lrscEvent = DifftestModule(new DiffLrScEvent)
+  lrscEvent.coreid := 0.U
+  lrscEvent.valid := RegNext(io.lsu.commit_sc_valid.asUInt.orR, false.B)
+  val commitScSuccess =
+    PriorityMux(io.lsu.commit_sc_valid.zip(io.lsu.commit_sc_success))
+  lrscEvent.success := RegNext(commitScSuccess, false.B)
+
+  val phyRegs = DifftestModule(new DiffPhyIntRegState(numIntPhysRegs))
+  phyRegs.coreid := 0.U
+  phyRegs.value := iregfile.debug_values
+
+  val archRename =
+    DifftestModule(new DiffArchIntRenameTable(numIntPhysRegs))
+  archRename.coreid := 0.U
+  archRename.value := rename_stage.debug_com_map_table
+
+  // CSRFile consumes BOOM's exception one cycle after the ROB.  Probe those
+  // already-aligned inputs and retain the same extra DiffTest delay used by
+  // Rocket so CSR state has taken effect before the reference comparison.
+  val archEvent = DifftestModule(new DiffArchEvent, delay = 1)
+  archEvent.coreid := 0.U
+  archEvent.valid := csr.io.exception
+  archEvent.interrupt := Mux(csr.io.exception && csr.io.cause(xLen-1), csr.io.cause, 0.U)
+  archEvent.exception := Mux(csr.io.exception && !csr.io.cause(xLen-1), csr.io.cause, 0.U)
+  archEvent.exceptionPC := Sext(csr.io.pc, xLen)
+  archEvent.exceptionInst := csr.io.inst.head
+  archEvent.hasNMI := false.B
+  archEvent.virtualInterruptIsHvictlInject := false.B
+  archEvent.irToHS := false.B
+  archEvent.irToVS := false.B
+
+  val trapEvent = DifftestModule(new DiffTrapEvent)
+  trapEvent.coreid := 0.U
+  trapEvent.hasTrap := diffExit.asUInt.orR
+  trapEvent.cycleCnt := debug_tsc_reg
+  trapEvent.instrCnt := debug_irt_reg
+  trapEvent.hasWFI := false.B
+  trapEvent.code := iregfile.debug_values(rename_stage.debug_com_map_table(10))
+  trapEvent.pc := PriorityMux(diffExit.zip(diffExitPC))
+
+  val csrState = DifftestModule(new DiffCSRState)
+  csrState.coreid := 0.U
+  val diffMstatus = BoringUtils.bore(csr.read_mstatus)
+  csrState.privilegeMode := Cat(BoringUtils.bore(csr.reg_debug), csr.io.status.prv)
+  csrState.mstatus := diffMstatus
+  // Mirror CSRFile's read_sstatus construction.  This BOOM configuration does
+  // not expose UBE through sstatus, hence bit 6 is deliberately absent.
+  csrState.sstatus := diffMstatus & "h80000003000de722".U(xLen.W)
+  csrState.mepc := Sext(BoringUtils.bore(csr.reg_mepc), xLen) & ~1.U(xLen.W)
+  csrState.sepc := Sext(BoringUtils.bore(csr.reg_sepc), xLen) & ~1.U(xLen.W)
+  csrState.mtval := Sext(BoringUtils.bore(csr.reg_mtval), xLen)
+  csrState.stval := Sext(BoringUtils.bore(csr.reg_stval), xLen)
+  csrState.mtvec := BoringUtils.bore(csr.read_mtvec)
+  csrState.stvec := BoringUtils.bore(csr.read_stvec)
+  csrState.mcause := BoringUtils.bore(csr.reg_mcause)
+  csrState.scause := BoringUtils.bore(csr.reg_scause)
+  csrState.satp := BoringUtils.bore(csr.reg_satp).asUInt
+  // DiffCSRState carries software-controlled pending bits.  Hardware timer,
+  // software and external interrupt wires are synchronized through the
+  // architectural event path and can change between DUT/REF sampling points.
+  csrState.mip := BoringUtils.bore(csr.reg_mip).asUInt
+  csrState.mie := BoringUtils.bore(csr.reg_mie)
+  csrState.mscratch := BoringUtils.bore(csr.reg_mscratch)
+  csrState.sscratch := BoringUtils.bore(csr.reg_sscratch)
+  csrState.mideleg := BoringUtils.bore(csr.read_mideleg)
+  csrState.medeleg := BoringUtils.bore(csr.read_medeleg)
 
 
   //-------------------------------------------------------------

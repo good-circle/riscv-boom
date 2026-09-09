@@ -65,12 +65,16 @@ class RenameMapTable(
     // Signals for restoring state following misspeculation.
     val brupdate      = Input(new BrUpdateInfo)
     val rollback    = Input(Bool())
+
+    // Committed logical-to-physical mappings for architectural-state probes.
+    val debug_com_map_table = Output(Vec(numLregs, UInt(pregSz.W)))
   })
 
   // The map table register array and its branch snapshots.
   val map_table = RegInit(VecInit((0 until numLregs) map { i => i.U(pregSz.W) }))
   val com_map_table = RegInit(VecInit((0 until numLregs) map { i => i.U(pregSz.W) }))
   val br_snapshots = Reg(Vec(maxBrCount, Vec(numLregs, UInt(pregSz.W))))
+  io.debug_com_map_table := com_map_table
 
   // The intermediate states of the map table following modification by each pipeline slot.
   val remap_table = Wire(Vec(plWidth+1, Vec(numLregs, UInt(pregSz.W))))

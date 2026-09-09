@@ -285,14 +285,16 @@ class Rob(
   val rob_debug_inst_rdata = Wire(Vec(coreWidth, UInt(32.W)))
   val rob_debug_inst_wmask = WireInit(VecInit(0.U(coreWidth.W).asBools))
   val rob_debug_inst_wdata = Wire(Vec(coreWidth, UInt(32.W)))
-  // Used for trace port, for debug purposes only
-  if (usingTrace) {
-    val rob_debug_inst_mem   = SyncReadMem(numRobRows, Vec(coreWidth, UInt(32.W)))
-    rob_debug_inst_mem.write(rob_tail, rob_debug_inst_wdata, rob_debug_inst_wmask)
-    rob_debug_inst_rdata := rob_debug_inst_mem.read(rob_head, will_commit.reduce(_||_))
-  } else {
-    rob_debug_inst_rdata := DontCare
-  }
+  // Retired instruction probes (DiffTest as well as the optional trace port)
+  // consume this one-cycle-latency debug memory.  Historically the memory was
+  // only instantiated when `usingTrace` was enabled, leaving the commit probe
+  // as DontCare in the normal BOOM configuration and producing zero/random
+  // instruction words.  Keep the memory live unconditionally; the modest
+  // storage cost is required whenever architectural commit information is
+  // exported.
+  val rob_debug_inst_mem   = SyncReadMem(numRobRows, Vec(coreWidth, UInt(32.W)))
+  rob_debug_inst_mem.write(rob_tail, rob_debug_inst_wdata, rob_debug_inst_wmask)
+  rob_debug_inst_rdata := rob_debug_inst_mem.read(rob_head, will_commit.reduce(_||_))
 
   // Branch resolution
   val brupdate_b2_rob_row = GetRowIdx(io.brupdate.b2.uop.rob_idx)

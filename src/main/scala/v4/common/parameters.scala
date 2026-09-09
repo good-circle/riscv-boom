@@ -174,10 +174,10 @@ class BoomCustomCSRs(implicit p: Parameters) extends freechips.rocketchip.tile.C
     Some(CustomCSR(chickenCSRId, mask, Some(init)))
   }
 
-  val enableOOOCSRId = 0x800
+  def enableOOOCSRId = 0x800
   def enableOOOCSR = Some(CustomCSR(enableOOOCSRId, BigInt(1), Some(BigInt(1))))
 
-  val enableBPDCSRId = 0x808
+  def enableBPDCSRId = 0x808
   def enableBPDCSR = Some(CustomCSR(enableBPDCSRId, BigInt(1), Some(BigInt(1))))
 
   def marchid = CustomCSR.constant(CSRs.marchid, BigInt(2))
