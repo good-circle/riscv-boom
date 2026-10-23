@@ -32,6 +32,9 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   val numWakeupPorts = fpIssueParams.issueWidth + numLlPorts
   val fpPregSz = log2Ceil(numFpPhysRegs)
 
+  // Export IEEE values, including NaN boxing, rather than HardFloat's recoding.
+  val debug_values = IO(Output(Vec(numFpPhysRegs, UInt(fLen.W))))
+
   val io = IO(new Bundle {
     val brupdate         = Input(new BrUpdateInfo())
     val flush_pipeline   = Input(Bool())
@@ -82,6 +85,7 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
     "Floating Point"
   ))
   val fp_bypasses = Wire(Vec(fpWidth, Valid(new ExeUnitResp(xLen+1))))
+  debug_values := VecInit(fregfile.debug_values.map(data => ieee(data)))
   val fp_wakeups = Wire(Vec(numWakeupPorts, Valid(new Wakeup)))
   io.wakeups := fp_wakeups
 

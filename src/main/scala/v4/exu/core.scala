@@ -41,7 +41,9 @@ import freechips.rocketchip.util.{Str, UIntIsOneOf, CoreMonitorBundle, PlusArg}
 import freechips.rocketchip.devices.tilelink.{PLICConsts, CLINTConsts}
 import freechips.rocketchip.trace.{TraceCoreIngress, TraceCoreInterface, TraceCoreParams}
 import chisel3.util.experimental.BoringUtils
-import difftest.{DifftestModule, DiffArchEvent, DiffArchIntRenameTable, DiffCSRState, DiffInstrCommit, DiffLrScEvent, DiffPhyIntRegState, DiffTrapEvent}
+import difftest.{DifftestModule, DiffArchEvent, DiffArchFpRenameTable, DiffArchIntRenameTable,
+  DiffCSRState, DiffFpCSRState, DiffInstrCommit, DiffLrScEvent, DiffPhyFpRegState,
+  DiffPhyIntRegState, DiffTrapEvent}
 
 import boom.v4.common._
 import boom.v4.common.BoomCustomInstructions.NEMU_TRAP
@@ -1392,9 +1394,7 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
       commitCSR === "h106".U || commitCSR === "h306".U || commitCSR === "h320".U)
     val isIdCSR = commitInst(6, 0) === "h73".U &&
       (commitCSR >= "hf11".U && commitCSR <= "hf14".U)
-    val isUnsupportedPmpCSR = commitInst(6, 0) === "h73".U &&
-      (commitCSR >= "h3b4".U && commitCSR <= "h3bf".U)
-    val commit = DifftestModule(new DiffInstrCommit(diffNumIntPhysRegs), delay = 0)
+    val commit = DifftestModule(new DiffInstrCommit(math.max(diffNumIntPhysRegs, numFpPhysRegs)), delay = 0)
     commit.coreid := 0.U
     commit.index := w.U
     commit.valid := commitValid
@@ -1402,7 +1402,7 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
     // and BOOM's counters advance differently from NEMU's.  Treat their CSR
     // accesses like MMIO so DiffTest copies the architectural result while
     // retaining strict comparison for deterministic ISA/privileged state.
-    commit.skip := RegNext(io.lsu.commit_is_mmio(w), false.B) || isHpmCSR || isDebugCSR || isCounterCSR || isIdCSR || isUnsupportedPmpCSR
+    commit.skip := RegNext(io.lsu.commit_is_mmio(w), false.B) || isHpmCSR || isDebugCSR || isCounterCSR || isIdCSR
     commit.isRVC := commitUop.is_rvc
     commit.rfwen := commitUop.dst_rtype === RT_FIX && commitUop.ldst =/= 0.U
     commit.fpwen := commitUop.dst_rtype === RT_FLT
@@ -1440,6 +1440,20 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
   archRename.coreid := 0.U
   archRename.value := rename_stage.debug_com_map_table
   archRename.value(0) := numIntPhysRegs.U
+
+  if (usingFPU) {
+    val phyFpRegs = DifftestModule(new DiffPhyFpRegState(numFpPhysRegs))
+    phyFpRegs.coreid := 0.U
+    phyFpRegs.value := fp_pipeline.debug_values
+
+    val archFpRename = DifftestModule(new DiffArchFpRenameTable(numFpPhysRegs))
+    archFpRename.coreid := 0.U
+    archFpRename.value := fp_rename_stage.debug_com_map_table
+
+    val fpCSRState = DifftestModule(new DiffFpCSRState)
+    fpCSRState.coreid := 0.U
+    fpCSRState.fcsr := BoringUtils.bore(csr.read_fcsr)
+  }
 
   // CSRFile consumes BOOM's exception one cycle after the ROB.  Probe those
   // already-aligned inputs and retain the same extra DiffTest delay used by
