@@ -1369,6 +1369,10 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
   // delayed again (see the existing trace interface below).
   val diffExit = Wire(Vec(coreWidth, Bool()))
   val diffExitPC = Wire(Vec(coreWidth, UInt(xLen.W)))
+  // BOOM renames rd=x0 results too; source x0 operands use RT_ZERO instead.
+  // Give the probe a separate constant-zero slot so RAT[0] never exposes an
+  // otherwise discarded result, without reserving a real physical register.
+  val diffNumIntPhysRegs = numIntPhysRegs + 1
   for (w <- 0 until coreWidth) {
     val commitUop = RegNext(rob.io.commit.uops(w))
     val commitValid = RegNext(rob.io.commit.arch_valids(w), false.B)
@@ -1390,7 +1394,7 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
       (commitCSR >= "hf11".U && commitCSR <= "hf14".U)
     val isUnsupportedPmpCSR = commitInst(6, 0) === "h73".U &&
       (commitCSR >= "h3b4".U && commitCSR <= "h3bf".U)
-    val commit = DifftestModule(new DiffInstrCommit(numIntPhysRegs), delay = 0)
+    val commit = DifftestModule(new DiffInstrCommit(diffNumIntPhysRegs), delay = 0)
     commit.coreid := 0.U
     commit.index := w.U
     commit.valid := commitValid
@@ -1427,14 +1431,15 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
     PriorityMux(io.lsu.commit_sc_valid.zip(io.lsu.commit_sc_success))
   lrscEvent.success := RegNext(commitScSuccess, false.B)
 
-  val phyRegs = DifftestModule(new DiffPhyIntRegState(numIntPhysRegs))
+  val phyRegs = DifftestModule(new DiffPhyIntRegState(diffNumIntPhysRegs))
   phyRegs.coreid := 0.U
-  phyRegs.value := iregfile.debug_values
+  phyRegs.value := VecInit(iregfile.debug_values.toSeq :+ 0.U(xLen.W))
 
   val archRename =
-    DifftestModule(new DiffArchIntRenameTable(numIntPhysRegs))
+    DifftestModule(new DiffArchIntRenameTable(diffNumIntPhysRegs))
   archRename.coreid := 0.U
   archRename.value := rename_stage.debug_com_map_table
+  archRename.value(0) := numIntPhysRegs.U
 
   // CSRFile consumes BOOM's exception one cycle after the ROB.  Probe those
   // already-aligned inputs and retain the same extra DiffTest delay used by
