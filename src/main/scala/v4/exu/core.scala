@@ -1461,6 +1461,8 @@ class BoomCore(roccCSRs: Seq[Seq[CustomCSR]])(implicit p: Parameters) extends Bo
   val archEvent = DifftestModule(new DiffArchEvent, delay = 1)
   archEvent.coreid := 0.U
   archEvent.valid := csr.io.exception
+  // BOOM reports exceptions separately from ordinary commits.
+  archEvent.isLatter := false.B
   archEvent.interrupt := Mux(csr.io.exception && csr.io.cause(xLen-1), csr.io.cause, 0.U)
   archEvent.exception := Mux(csr.io.exception && !csr.io.cause(xLen-1), csr.io.cause, 0.U)
   archEvent.exceptionPC := Sext(csr.io.pc, xLen)
