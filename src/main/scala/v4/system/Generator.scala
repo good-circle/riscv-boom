@@ -15,6 +15,7 @@ object Generator {
       case "MediumBoomConfig" => new MediumBoomConfig
       case "LargeBoomConfig" => new LargeBoomConfig
       case "MediumBoomMem2GConfig" => new MediumBoomMem2GConfig
+      case "MediumBoomFpgaMem2GConfig" => new MediumBoomFpgaMem2GConfig
       case other => throw new IllegalArgumentException(s"unknown BOOM config: $other")
     }
     require(top == "SimTop", s"unknown BOOM top: $top")

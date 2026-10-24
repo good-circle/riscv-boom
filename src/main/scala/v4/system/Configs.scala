@@ -28,19 +28,24 @@ class WithBoomSupervisor extends Config((site, here, up) => {
   }
 })
 
-class BoomBaseConfig extends Config(
+class BoomBaseConfig(
+    mmioBase: BigInt = BigInt("10000000", 16),
+    mmioSize: BigInt = BigInt("100", 16),
+    mmioDataWidth: Int = 128,
+    mmioIdBits: Int = 4,
+    mmioMaxXferBytes: Int = 16) extends Config(
   new WithNoDebugModule ++
   new WithExternalResetVector ++
   new WithCoherentBusTopology ++
   new WithDefaultMemPort ++
   new WithCustomMMIOPort(
-    base_addr = BigInt("10000000", 16),
-    base_size = BigInt("100", 16),
+    base_addr = mmioBase,
+    base_size = mmioSize,
     // The Large BOOM coherent bus presents a 128-bit external AXI beat;
     // choosing that width here keeps the MMIO node valid for every config.
-    data_width = 128,
-    id_bits = 4,
-    maxXferBytes = 16) ++
+    data_width = mmioDataWidth,
+    id_bits = mmioIdBits,
+    maxXferBytes = mmioMaxXferBytes) ++
   new WithDefaultSlavePort ++
   new WithTimebase(BigInt(1000000)) ++
   new WithDTS("freechips,rocketchip-unknown", Nil) ++
@@ -54,3 +59,15 @@ class MediumBoomMem2GConfig extends Config(
   new WithBoomSupervisor ++
   new WithNMediumBooms(1) ++
   new BoomBaseConfig)
+
+/** FPGA image: MMIO goes to the board AXI UART16550 at 0x310b0000. */
+class MediumBoomFpgaMem2GConfig extends Config(
+  new WithExtMemSize(BigInt("80000000", 16)) ++
+  new WithBoomSupervisor ++
+  new WithNMediumBooms(1) ++
+  new BoomBaseConfig(
+    mmioBase = BigInt("310b0000", 16),
+    mmioSize = BigInt("10000", 16),
+    mmioDataWidth = 64,
+    mmioIdBits = 2,
+    mmioMaxXferBytes = 8))
