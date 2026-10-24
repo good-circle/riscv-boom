@@ -26,11 +26,21 @@ class BoomSimHarness(implicit p: Parameters)
     DifftestAXI4Bundle.connectRecord(mem, ldut.mem_axi4.head)
     mem
   }
-  val uart = SimAXIUart.connectMMIO(ldut).head
-  val difftestUart = IO(new UARTIO)
-  difftestUart.out.valid := uart.valid
-  difftestUart.out.ch := uart.bits
-  difftestUart.in.valid := false.B
+  private val fpgaPeri = Option.when(DifftestModule.isFPGA) {
+    val peri = IO(chiselTypeOf(ldut.mmio_axi4.head)).suggestName("peri")
+    DifftestAXI4Bundle.connectRecord(peri, ldut.mmio_axi4.head)
+    peri
+  }
+  private val uart = Option.when(!DifftestModule.isFPGA) {
+    SimAXIUart.connectMMIO(ldut).head
+  }
+  private val difftestUart = Option.when(!DifftestModule.isFPGA) {
+    val u = IO(new UARTIO)
+    u.out.valid := uart.get.valid
+    u.out.ch := uart.get.bits
+    u.in.valid := false.B
+    u
+  }
   val debugSuccess = WireInit(false.B)
   Debug.connectDebug(ldut.debug, ldut.resetctrl, ldut.psd, clock, reset.asBool, debugSuccess)
 
@@ -38,6 +48,12 @@ class BoomSimHarness(implicit p: Parameters)
   override def difftestMemIO: Option[DifftestMemIO] =
     fpgaMem.map(DifftestMemIO(_))
   override def connectTopIOs(difftest: DifftestTopIO): Unit = {
-    difftest.uart <> difftestUart
+    difftestUart match {
+      case Some(u) => difftest.uart <> u
+      case None =>
+        difftest.uart.out.valid := false.B
+        difftest.uart.out.ch := 0.U
+        difftest.uart.in.valid := false.B
+    }
   }
 }
