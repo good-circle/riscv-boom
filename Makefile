@@ -10,6 +10,7 @@ checkstyle:
 	$(SBT) $(SBT_FLAGS) scalastyle test:scalastyle
 
 CONFIG ?= MediumBoomConfig
+MEM_SIZE ?= 0x80000000
 DIFFTEST_CONFIG ?=
 TOP ?= SimTop
 BUILD_DIR ?= $(abspath build/boom-$(CONFIG))
@@ -21,7 +22,7 @@ verilog:
 	mkdir -p $(RTL_DIR)
 	NOOP_HOME=$(BUILD_DIR) MILL_VERSION=$(MILL_VERSION) \
 		$(MILL) -i boom.runMain boom.v4.system.Generator \
-		--top $(TOP) --config $(CONFIG) --target-dir $(RTL_DIR) \
+		--top $(TOP) --config $(CONFIG) --mem-size $(MEM_SIZE) --target-dir $(RTL_DIR) \
 		--target systemverilog --split-verilog \
 		$(if $(strip $(DIFFTEST_CONFIG)),--difftest-config $(DIFFTEST_CONFIG),)
 	test -s $(RTL_DIR)/$(TOP).sv
