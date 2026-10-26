@@ -101,10 +101,14 @@ Both families default to 2 GiB. Pass a byte count in decimal or hexadecimal
 with `MEM_SIZE`, for example `make verilog CONFIG=SmallBoomConfig MEM_SIZE=0x10000000`
 for the former 256 MiB map. The generator accepts the same value through
 `--mem-size`; Scala callers can pass `memSize` to each configuration.
-The `*BoomMem2GConfig` and `*BoomFpgaMem2GConfig` names remain available as
-compatibility aliases for Small, Medium, and Large. A `MEM_SIZE` override
-also applies when using an alias. Keep the workload DTB and host/REF RAM size
-consistent with the selected memory map.
+Memory size is selected only by the parameter, without separate Mem2G
+configuration names. Keep the workload DTB and host/REF RAM size consistent
+with the selected memory map.
+
+Both UART configurations use the same NEMU references:
+`riscv64-boom-ref_defconfig` and `riscv64-boom-fastref_defconfig`.
+DiffTest skips UART MMIO instructions, so neither REF needs a UART model or
+a separate FPGA configuration.
 
 For the reference model, use an OpenXiangShan NEMU checkout containing
 `configs/riscv64-boom-ref_defconfig`. Assuming NEMU and workload-builder are

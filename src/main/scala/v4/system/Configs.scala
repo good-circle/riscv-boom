@@ -60,11 +60,6 @@ class MediumBoomConfig(memSize: BigInt = BigInt("80000000", 16)) extends Config(
 class LargeBoomConfig(memSize: BigInt = BigInt("80000000", 16)) extends Config(
   new WithBoomSupervisor ++ new WithNLargeBooms(1) ++ new BoomBaseConfig(memSize = memSize))
 
-// Keep the explicit 2 GiB names accepted by existing build scripts.
-class SmallBoomMem2GConfig extends SmallBoomConfig
-class MediumBoomMem2GConfig extends MediumBoomConfig
-class LargeBoomMem2GConfig extends LargeBoomConfig
-
 /** FPGA image: MMIO goes to the board AXI UART16550 at 0x310b0000. */
 class BoomFpgaBaseConfig(
     memSize: BigInt = BigInt("80000000", 16),
@@ -85,7 +80,3 @@ class LargeBoomFpgaConfig(memSize: BigInt = BigInt("80000000", 16)) extends Conf
   new WithBoomSupervisor ++ new WithNLargeBooms(1) ++
   // The Large instruction TLB requires 16-byte transfers, over two AXI beats.
   new BoomFpgaBaseConfig(memSize, mmioMaxXferBytes = 16))
-
-class SmallBoomFpgaMem2GConfig extends SmallBoomFpgaConfig
-class MediumBoomFpgaMem2GConfig extends MediumBoomFpgaConfig
-class LargeBoomFpgaMem2GConfig extends LargeBoomFpgaConfig

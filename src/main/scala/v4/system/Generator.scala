@@ -20,15 +20,9 @@ object Generator {
       case "SmallBoomConfig" => new SmallBoomConfig
       case "MediumBoomConfig" => new MediumBoomConfig
       case "LargeBoomConfig" => new LargeBoomConfig
-      case "SmallBoomMem2GConfig" => new SmallBoomMem2GConfig
-      case "MediumBoomMem2GConfig" => new MediumBoomMem2GConfig
-      case "LargeBoomMem2GConfig" => new LargeBoomMem2GConfig
       case "SmallBoomFpgaConfig" => new SmallBoomFpgaConfig
       case "MediumBoomFpgaConfig" => new MediumBoomFpgaConfig
       case "LargeBoomFpgaConfig" => new LargeBoomFpgaConfig
-      case "SmallBoomFpgaMem2GConfig" => new SmallBoomFpgaMem2GConfig
-      case "MediumBoomFpgaMem2GConfig" => new MediumBoomFpgaMem2GConfig
-      case "LargeBoomFpgaMem2GConfig" => new LargeBoomFpgaMem2GConfig
       case other => throw new IllegalArgumentException(s"unknown BOOM config: $other")
     }
     val c = new Config(new WithExtMemSize(memorySize) ++ base)
